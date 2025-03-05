@@ -9,7 +9,7 @@ load_dotenv()
 pinecone_api_key = os.getenv("pinecone_api_key")
 
 # Initialize Pinecone client
-pc = Pinecone(pinecone_api_key)
+pc = Pinecone(api_key=pinecone_api_key)
 
 # Define Index Name & Model
 INDEX_NAME = "rag-index"
