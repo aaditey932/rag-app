@@ -1,7 +1,6 @@
 import os
 import requests
 import fitz
-import torch
 import uuid
 import streamlit as st
 from tqdm import tqdm

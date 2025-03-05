@@ -14,7 +14,7 @@ pc = Pinecone(pinecone_api_key)
 # Define Index Name & Model
 INDEX_NAME = "rag-index"
 EMBEDDING_MODEL = "all-mpnet-base-v2"
-DEVICE = "cuda"
+DEVICE = "cpu"
 BATCH_SIZE = 100  # Adjust if needed
 
 # Load embedding model to get dimensions

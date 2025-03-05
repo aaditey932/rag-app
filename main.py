@@ -1,7 +1,6 @@
 import os
 import requests
 import fitz
-import torch
 import uuid
 import numpy as np
 from tqdm import tqdm
