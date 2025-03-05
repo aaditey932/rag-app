@@ -3,45 +3,33 @@ import requests
 import fitz
 import torch
 import uuid
+import numpy as np
 from tqdm import tqdm
 from dotenv import load_dotenv
 from spacy.lang.en import English
 from sentence_transformers import SentenceTransformer
-from pinecone_index import initialize_pinecone_index, upsert_vectors  # Pinecone client functions
 from openai import OpenAI
 
+# Load environment variables
 def load_environment():
     """Loads environment variables."""
     load_dotenv()
     return {
-        "pinecone_api_key": os.getenv("pinecone_api_key"),
-        "host_url": os.getenv("PINECONE_INDEX_HOST"),
         "openai_api_key": os.getenv("OPENAI_API_KEY")
     }
 
+# Initialize OpenAI Client
 def initialize_openai_client(api_key):
     """Initializes OpenAI client."""
     return OpenAI(api_key=api_key)
 
-def initialize_embedding_model(device="cuda", model_name="all-mpnet-base-v2"):
+# Initialize Embedding Model
+def initialize_embedding_model(device="cpu", model_name="all-mpnet-base-v2"):
     """Loads the embedding model."""
     model = SentenceTransformer(model_name, device=device)
-    return model, model.get_sentence_embedding_dimension()
+    return model
 
-def namespace_has_vectors(index, namespace, embedding_dim):
-    """Checks if vectors exist in a Pinecone namespace."""
-    try:
-        response = index.query(
-            namespace=namespace,
-            vector=[0] * embedding_dim,
-            top_k=1,
-            include_values=False
-        )
-        return len(response.get("matches", [])) > 0
-    except Exception as e:
-        print(f"Error checking namespace: {e}")
-        return False
-
+# Download PDF if not available
 def download_pdf(pdf_path, pdf_url):
     """Downloads the PDF if it does not exist."""
     if not os.path.exists(pdf_path):
@@ -50,27 +38,31 @@ def download_pdf(pdf_path, pdf_url):
             with open(pdf_path, "wb") as file:
                 file.write(response.content)
 
+# Process PDF and Split into Chunks
 def process_pdf(pdf_path):
     """Reads and processes PDF into structured text."""
     nlp = English()
     nlp.add_pipe("sentencizer")
     doc = fitz.open(pdf_path)
     pages_and_texts = []
+    
     for page_number, page in tqdm(enumerate(doc), desc="Processing PDF"):
         text = page.get_text().replace("\n", " ").strip()
+        sentences = [str(sentence) for sentence in list(nlp(text).sents)]
+        sentence_chunks = [" ".join(sentences[i:i+10]).strip() for i in range(0, len(sentences), 10)]
+        
         pages_and_texts.append({
             "page_number": page_number,
             "text": text,
-            "sentences": [str(sentence) for sentence in list(nlp(text).sents)],
+            "sentences": sentences,
+            "sentence_chunks": sentence_chunks
         })
-        pages_and_texts[-1]["sentence_chunks"] = [
-            "".join(pages_and_texts[-1]["sentences"][i:i + 10]).strip()
-            for i in range(0, len(pages_and_texts[-1]["sentences"], 10))
-        ]
+    
     return pages_and_texts
 
-def prepare_pinecone_vectors(pages_and_texts, embedding_model):
-    """Prepares vectors for Pinecone indexing."""
+# Convert Chunks to Embeddings
+def prepare_vectors(pages_and_texts, embedding_model):
+    """Prepares text chunks as vectors for similarity search."""
     vectors = []
     for item in pages_and_texts:
         for chunk in item["sentence_chunks"]:
@@ -80,23 +72,46 @@ def prepare_pinecone_vectors(pages_and_texts, embedding_model):
                 "values": embedding,
                 "metadata": {
                     "page_number": item["page_number"],
-                    "source": "human-nutrition-text.pdf",
                     "sentences": chunk
                 }
             })
     return vectors
 
-def retrieve_relevant_context(index, query, embedding_model, top_k=3, namespace="nutrition-text"):
-    """Retrieves relevant context from Pinecone."""
-    query_embedding = embedding_model.encode(query, normalize_embeddings=True).tolist()
-    query_result = index.query(
-        namespace=namespace,
-        vector=query_embedding,
-        top_k=top_k,
-        include_metadata=True
-    )
-    return [match["metadata"]["sentences"] for match in query_result["matches"]]
+# Custom Cosine Similarity Search (Without Pinecone)
+def custom_similarity_search(query_text, stored_vectors, embedding_model, top_k=3):
+    """Performs similarity search manually using cosine similarity."""
+    try:
+        # Convert query to embedding vector
+        query_embedding = embedding_model.encode(query_text, normalize_embeddings=True)
 
+        # Compute cosine similarity
+        similarities = []
+        for item in stored_vectors:
+            stored_embedding = np.array(item["values"])
+            similarity = np.dot(query_embedding, stored_embedding) / (np.linalg.norm(query_embedding) * np.linalg.norm(stored_embedding))
+            similarities.append((item, similarity))
+
+        # Sort by similarity (highest first)
+        similarities = sorted(similarities, key=lambda x: x[1], reverse=True)
+
+        # Retrieve top-k results
+        top_results = [
+            {
+                "id": item["id"],
+                "score": score,
+                "page_number": item["metadata"].get("page_number", "Unknown"),
+                "sentences": item["metadata"].get("sentences", "")
+            }
+            for item, score in similarities[:top_k]
+        ]
+
+        return top_results
+
+    except Exception as e:
+        print(f"Error performing similarity search: {e}")
+        return []
+
+# Format Prompt for OpenAI LLM
 def format_prompt(query, context_items):
     """Formats the query and retrieved context into a structured prompt for OpenAI."""
     context_text = "\n- " + "\n- ".join(context_items)
@@ -110,12 +125,18 @@ Use the following context items to answer the user query:
 User query: {query}
 Answer:"""
 
-def generate_answer(client, index, query, embedding_model, top_k=3, namespace="nutrition-text"):
-    """Retrieves context and generates a response using OpenAI's GPT-4o-mini."""
-    context_items = retrieve_relevant_context(index, query, embedding_model, top_k, namespace)
+# Generate Answer Using OpenAI LLM
+def generate_answer(client, stored_vectors, query, embedding_model, top_k=3):
+    """Retrieves relevant context and generates response using OpenAI's GPT-4o-mini."""
+    context_items = custom_similarity_search(query, stored_vectors, embedding_model, top_k)
+    
     if not context_items:
         return "No relevant information found in the knowledge base."
-    prompt = format_prompt(query, context_items)
+
+    context_text = [item["sentences"] for item in context_items]
+    prompt = format_prompt(query, context_text)
+
+    # Generate response using OpenAI
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role": "system", "content": "You are a helpful AI assistant."},
@@ -126,22 +147,28 @@ def generate_answer(client, index, query, embedding_model, top_k=3, namespace="n
     )
     return completion.choices[0].message.content
 
+# Main Execution Function
 def main():
     """Main execution function."""
     env_vars = load_environment()
     client = initialize_openai_client(env_vars["openai_api_key"])
-    embedding_model, embedding_dim = initialize_embedding_model()
-    index = initialize_pinecone_index()
+    embedding_model = initialize_embedding_model()
+
+    # Download and Process PDF
+    pdf_path = "human-nutrition-text.pdf"
+    pdf_url = "https://pressbooks.oer.hawaii.edu/humannutrition2/open/download?type=pdf"
+    download_pdf(pdf_path, pdf_url)
+    pages_and_texts = process_pdf(pdf_path)
+
+    # Prepare Vectors for Similarity Search
+    stored_vectors = prepare_vectors(pages_and_texts, embedding_model)
+
+    # Query and Get Response
+    query = input("Hello! How can I help you today?\n> ")
+    response = generate_answer(client, stored_vectors, query, embedding_model)
     
-    if not namespace_has_vectors(index, "nutrition-text", embedding_dim):
-        download_pdf("human-nutrition-text.pdf", "https://pressbooks.oer.hawaii.edu/humannutrition2/open/download?type=pdf")
-        pages_and_texts = process_pdf("human-nutrition-text.pdf")
-        vectors = prepare_pinecone_vectors(pages_and_texts, embedding_model)
-        upsert_vectors(index, vectors, namespace="nutrition-text")
-    
-    query = input("Hello! How can I help you today?")
-    response = generate_answer(client, index, query, embedding_model)
     print(response)
 
+# Run the Script
 if __name__ == "__main__":
     main()
