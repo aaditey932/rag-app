@@ -1,7 +1,7 @@
 # 📚 AI-Powered RAG: Nutrition Text Assistant
 
 ## 🚀 Overview
-This project implements an **AI-powered Retrieval-Augmented Generation (RAG) system** designed to extract relevant information from **scientific research papers** and generate insightful responses. Using **Pinecone, OpenAI's GPT-4o, and Streamlit**, the system enhances accessibility to scientific knowledge in **human nutrition**.
+This project implements an **AI-powered Retrieval-Augmented Generation (RAG) system** designed to extract relevant information from **scientific research papers** and generate insightful responses. Using **Pinecone, OpenAI's GPT-4o-mini, and Streamlit**, the system enhances accessibility to scientific knowledge in **human nutrition**.
 
 ---
 
@@ -25,7 +25,7 @@ This project implements an **AI-powered Retrieval-Augmented Generation (RAG) sys
 1. **Text Ingestion & Processing:** Extracts content from research papers (PDFs) and splits it into meaningful chunks.
 2. **Embedding Generation:** Converts text into dense vectors using **SentenceTransformers**.
 3. **Vector Storage & Retrieval:** Stores embeddings in **Pinecone** and retrieves relevant text upon query.
-4. **Response Generation:** Uses **GPT-4o** to generate AI responses based on retrieved context.
+4. **Response Generation:** Uses **GPT-4o-mini** to generate AI responses based on retrieved context.
 5. **Evaluation Metrics:** Measures performance with **context recall, faithfulness, and factual correctness**.
 
 ---
@@ -47,7 +47,7 @@ This project implements an **AI-powered Retrieval-Augmented Generation (RAG) sys
 ## 📥 Installation & Usage
 ### 1️⃣ Clone the Repository
 ```bash
-git clone https://github.com/yourusername/AI-Nutrition-RAG.git
+git clone https://github.com/aaditey932/rag-app.git
 ```
 
 ### 2️⃣ Install Dependencies
@@ -111,6 +111,6 @@ This project is licensed under the **MIT License**.
 ---
 
 ## 🎥 Demo Video
-🎬 **Watch the full demo here:** [YouTube Video](https://youtu.be/1J63noZbh68)
+🎬 **Watch the full demo here:** [YouTube Video](https://youtu.be/j1G3noZbh68)
 
 For any queries, feel free to reach out! 🚀
